@@ -1,0 +1,79 @@
+trigger:
+  branches:
+    include:
+      - main
+
+variables:
+  buildConfiguration: 'Release'
+  dockerImageName: 'yourdockeruser/backend-image'
+  dockerRegistryServiceConnection: 'your-azure-docker-connection'
+
+stages:
+
+# -------------------
+# Stage 1: CI - Build & Analyze
+# -------------------
+- stage: CI
+  displayName: 'Build and Analyze'
+  jobs:
+  - job: Build
+    displayName: 'Build Job'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - checkout: self
+
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.9'
+
+    - script: |
+        pip install flask
+        echo "✅ Python backend dependencies installed"
+      displayName: 'Install Python Dependencies'
+
+    - task: SonarCloudPrepare@1
+      inputs:
+        SonarCloud: 'your-sonarcloud-connection'
+        organization: 'your-org-name'
+        scannerMode: 'CLI'
+        configMode: 'manual'
+        cliProjectKey: 'your-project-key'
+        cliProjectName: 'azure-devops-3tier'
+
+    - script: |
+        echo "Running tests (mock)"
+      displayName: 'Run Tests'
+
+    - task: SonarCloudAnalyze@1
+    - task: SonarCloudPublish@1
+      inputs:
+        pollingTimeoutSec: '300'
+
+    - publish: $(System.DefaultWorkingDirectory)/backend
+      artifact: drop-backend
+
+# -------------------
+# Stage 2: CD - Deploy to Azure Web App
+# -------------------
+- stage: CD
+  displayName: 'Deploy to Azure Web App'
+  dependsOn: CI
+  condition: succeeded()
+  jobs:
+  - deployment: DeployWebApp
+    environment: 'production'
+    pool:
+      vmImage: 'ubuntu-latest'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: drop-backend
+
+          - task: AzureWebApp@1
+            inputs:
+              azureSubscription: 'your-azure-service-connection'
+              appName: 'your-backend-app-name'
+              package: '$(Pipeline.Workspace)/drop-backend'
